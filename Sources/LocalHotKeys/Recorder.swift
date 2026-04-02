@@ -12,18 +12,29 @@ import AppKit
 ///     LocalHotKeys.Recorder(shortcut: .navigateLeft)
 /// }
 /// ```
-public struct Recorder: NSViewRepresentable {
+public struct Recorder: View {
     private let shortcut: Shortcut
 
     public init(shortcut: Shortcut) {
         self.shortcut = shortcut
     }
 
-    public func makeNSView(context: Context) -> RecorderNSView {
+    public var body: some View {
+        RecorderField(shortcut: shortcut)
+            .fixedSize()
+    }
+}
+
+// MARK: - RecorderField (NSViewRepresentable)
+
+private struct RecorderField: NSViewRepresentable {
+    let shortcut: Shortcut
+
+    func makeNSView(context: Context) -> RecorderNSView {
         RecorderNSView(shortcut: shortcut)
     }
 
-    public func updateNSView(_ nsView: RecorderNSView, context: Context) {
+    func updateNSView(_ nsView: RecorderNSView, context: Context) {
         nsView.shortcut = shortcut
         nsView.refresh()
     }
@@ -31,132 +42,131 @@ public struct Recorder: NSViewRepresentable {
 
 // MARK: - RecorderNSView
 
-public final class RecorderNSView: NSView {
+public final class RecorderNSView: NSSearchField, NSSearchFieldDelegate {
     public var shortcut: Shortcut
-    private var isRecording = false
     private var localMonitor: Any?
-
-    private lazy var shortcutLabel: NSTextField = {
-        let f = NSTextField(labelWithString: "")
-        f.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        f.alignment = .center
-        f.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        return f
-    }()
-
-    private lazy var clearButton: NSButton = {
-        let b = NSButton(frame: .zero)
-        b.bezelStyle = .circular
-        b.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Clear")
-        b.imageScaling = .scaleProportionallyDown
-        b.isBordered = false
-        b.target = self
-        b.action = #selector(clearShortcut)
-        b.setContentHuggingPriority(.required, for: .horizontal)
-        b.setContentHuggingPriority(.required, for: .vertical)
-        return b
-    }()
+    private var canBecomeKey = false
+    private var cancelButtonCell: NSButtonCell?
 
     public init(shortcut: Shortcut) {
         self.shortcut = shortcut
-        super.init(frame: .zero)
-        setup()
+        super.init(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
+        configure()
+        refresh()
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
     public override var intrinsicContentSize: NSSize {
         NSSize(width: 120, height: 24)
     }
 
-    private func setup() {
+    public override var canBecomeKeyView: Bool { canBecomeKey }
+
+    private func configure() {
+        delegate = self
+        placeholderString = "Record Shortcut"
+        alignment = .center
+        (cell as? NSSearchFieldCell)?.searchButtonCell = nil
+
         wantsLayer = true
-        layer?.cornerRadius = 12  // capsule (height / 2)
-        layer?.borderWidth = 1
+        setContentHuggingPriority(.defaultHigh, for: .vertical)
+        setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
-        addSubview(shortcutLabel)
-        addSubview(clearButton)
+        // Must be last — save cancel button cell for show/hide
+        cancelButtonCell = (cell as? NSSearchFieldCell)?.cancelButtonCell
 
-        shortcutLabel.translatesAutoresizingMaskIntoConstraints = false
-        clearButton.translatesAutoresizingMaskIntoConstraints = false
-
-        NSLayoutConstraint.activate([
-            shortcutLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            shortcutLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            shortcutLabel.trailingAnchor.constraint(lessThanOrEqualTo: clearButton.leadingAnchor, constant: -4),
-
-            clearButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            clearButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            clearButton.widthAnchor.constraint(equalToConstant: 14),
-            clearButton.heightAnchor.constraint(equalToConstant: 14),
-        ])
-
-        let click = NSClickGestureRecognizer(target: self, action: #selector(startRecording))
-        addGestureRecognizer(click)
-
-        refresh()
+        // Prevent receiving initial focus when the window opens
+        Task { @MainActor [weak self] in
+            self?.canBecomeKey = true
+        }
     }
 
     public func refresh() {
-        let hasShortcut = shortcut.key != nil
-
-        if isRecording {
-            shortcutLabel.stringValue = "Type shortcut…"
-            shortcutLabel.textColor = .secondaryLabelColor
-        } else if hasShortcut {
-            shortcutLabel.stringValue = shortcut.displayString
-            shortcutLabel.textColor = .labelColor
-        } else {
-            shortcutLabel.stringValue = "Record Shortcut"
-            shortcutLabel.textColor = .secondaryLabelColor
-        }
-
-        clearButton.isHidden = !hasShortcut || isRecording
-
-        layer?.borderColor = isRecording
-            ? NSColor.controlAccentColor.cgColor
-            : NSColor.separatorColor.cgColor
-        layer?.backgroundColor = isRecording
-            ? NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
-            : NSColor.controlBackgroundColor.cgColor
+        stringValue = shortcut.key != nil ? shortcut.displayString : ""
+        (cell as? NSSearchFieldCell)?.cancelButtonCell = stringValue.isEmpty ? nil : cancelButtonCell
     }
 
-    @objc private func startRecording() {
-        guard !isRecording else { return }
-        isRecording = true
-        refresh()
+    // MARK: - Focus / Recording
 
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleKeyEvent(event)
+    public override func becomeFirstResponder() -> Bool {
+        guard window != nil else { return false }
+        let result = super.becomeFirstResponder()
+        guard result else { return result }
+
+        placeholderString = "Type shortcut…"
+        hideCaret()
+
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseUp, .rightMouseUp]) { [weak self] event in
+            guard let self else { return event }
+
+            // Click outside — stop recording, pass event through
+            if event.type == .leftMouseUp || event.type == .rightMouseUp {
+                let point = convert(event.locationInWindow, from: nil)
+                if !bounds.insetBy(dx: -3, dy: -3).contains(point) {
+                    blur()
+                    return event
+                }
+                return nil
+            }
+
+            handleKeyEvent(event)
             return nil
         }
+
+        return result
     }
 
     private func handleKeyEvent(_ event: NSEvent) {
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
 
         if event.keyCode == Key.escape.keyCode {
-            // cancel — restore previous
+            // Cancel — keep existing shortcut
         } else if event.keyCode == Key.delete.keyCode && modifiers.isEmpty {
             shortcut.reset()
         } else {
             shortcut.set(key: Key(keyCode: event.keyCode), modifiers: modifiers)
         }
 
-        stopRecording()
+        refresh()
+        blur()
     }
 
     private func stopRecording() {
-        isRecording = false
         if let monitor = localMonitor {
             NSEvent.removeMonitor(monitor)
             localMonitor = nil
         }
-        refresh()
+        placeholderString = "Record Shortcut"
+        restoreCaret()
     }
 
-    @objc private func clearShortcut() {
-        shortcut.reset()
-        refresh()
+    private func blur() {
+        window?.makeFirstResponder(nil)
+    }
+
+    // MARK: - Caret
+
+    private func hideCaret() {
+        (currentEditor() as? NSTextView)?.insertionPointColor = .clear
+    }
+
+    private func restoreCaret() {
+        (currentEditor() as? NSTextView)?.insertionPointColor = .controlTextColor
+    }
+
+    // MARK: - NSSearchFieldDelegate
+
+    public func controlTextDidEndEditing(_ obj: Notification) {
+        stopRecording()
+    }
+
+    public func controlTextDidChange(_ obj: Notification) {
+        // User clicked the built-in × cancel button — clear the shortcut
+        if stringValue.isEmpty {
+            shortcut.reset()
+        }
+        (cell as? NSSearchFieldCell)?.cancelButtonCell = stringValue.isEmpty ? nil : cancelButtonCell
     }
 }
