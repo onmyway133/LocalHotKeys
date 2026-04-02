@@ -1,75 +1,63 @@
 import SwiftUI
 import AppKit
 
-/// A SwiftUI view that lets the user assign or clear a local keyboard shortcut.
+/// A compact recorder field for assigning a local keyboard shortcut.
+/// Does not include a label — style the surrounding UI yourself.
 ///
 /// Usage:
 /// ```swift
-/// LocalShortcuts.Recorder("Navigate Left", shortcut: .navigateLeft)
+/// HStack {
+///     Text("Navigate Left")
+///     Spacer()
+///     LocalHotKeys.Recorder(shortcut: .navigateLeft)
+/// }
 /// ```
-public struct Recorder: View {
-    private let label: String
+public struct Recorder: NSViewRepresentable {
     private let shortcut: Shortcut
 
-    public init(_ label: String, shortcut: Shortcut) {
-        self.label = label
+    public init(shortcut: Shortcut) {
         self.shortcut = shortcut
     }
 
-    public var body: some View {
-        HStack {
-            Text(label)
-            Spacer()
-            RecorderField(shortcut: shortcut)
-        }
-    }
-}
-
-// MARK: - RecorderField (AppKit-backed)
-
-private struct RecorderField: NSViewRepresentable {
-    let shortcut: Shortcut
-
-    func makeNSView(context: Context) -> RecorderNSView {
+    public func makeNSView(context: Context) -> RecorderNSView {
         RecorderNSView(shortcut: shortcut)
     }
 
-    func updateNSView(_ view: RecorderNSView, context: Context) {
-        view.shortcut = shortcut
-        view.refresh()
+    public func updateNSView(_ nsView: RecorderNSView, context: Context) {
+        nsView.shortcut = shortcut
+        nsView.refresh()
     }
 }
 
 // MARK: - RecorderNSView
 
-private final class RecorderNSView: NSView {
-    var shortcut: Shortcut
+public final class RecorderNSView: NSView {
+    public var shortcut: Shortcut
     private var isRecording = false
     private var localMonitor: Any?
 
-    private lazy var label: NSTextField = {
+    private lazy var shortcutLabel: NSTextField = {
         let f = NSTextField(labelWithString: "")
         f.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         f.alignment = .center
+        f.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         return f
     }()
 
     private lazy var clearButton: NSButton = {
-        let b = NSButton(title: "×", target: self, action: #selector(clearShortcut))
-        b.bezelStyle = .roundRect
-        b.font = .systemFont(ofSize: 11)
+        let b = NSButton(frame: .zero)
+        b.bezelStyle = .circular
+        b.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Clear")
+        b.imageScaling = .scaleProportionallyDown
+        b.isBordered = false
+        b.target = self
+        b.action = #selector(clearShortcut)
+        b.setContentHuggingPriority(.required, for: .horizontal)
+        b.setContentHuggingPriority(.required, for: .vertical)
         return b
     }()
 
-    private lazy var container: NSView = {
-        let v = NSView()
-        v.wantsLayer = true
-        v.layer?.cornerRadius = 5
-        v.layer?.borderWidth = 1
-        return v
-    }()
-
-    init(shortcut: Shortcut) {
+    public init(shortcut: Shortcut) {
         self.shortcut = shortcut
         super.init(frame: .zero)
         setup()
@@ -77,44 +65,58 @@ private final class RecorderNSView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    public override var intrinsicContentSize: NSSize {
+        NSSize(width: 120, height: 24)
+    }
+
     private func setup() {
-        addSubview(container)
-        container.addSubview(label)
+        wantsLayer = true
+        layer?.cornerRadius = 12  // capsule (height / 2)
+        layer?.borderWidth = 1
+
+        addSubview(shortcutLabel)
         addSubview(clearButton)
 
-        container.translatesAutoresizingMaskIntoConstraints = false
-        label.translatesAutoresizingMaskIntoConstraints = false
+        shortcutLabel.translatesAutoresizingMaskIntoConstraints = false
         clearButton.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
-            container.leadingAnchor.constraint(equalTo: leadingAnchor),
-            container.topAnchor.constraint(equalTo: topAnchor),
-            container.bottomAnchor.constraint(equalTo: bottomAnchor),
-            container.widthAnchor.constraint(greaterThanOrEqualToConstant: 80),
+            shortcutLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            shortcutLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            shortcutLabel.trailingAnchor.constraint(lessThanOrEqualTo: clearButton.leadingAnchor, constant: -4),
 
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
-            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
-            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-
-            clearButton.leadingAnchor.constraint(equalTo: container.trailingAnchor, constant: 4),
-            clearButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            clearButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             clearButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            clearButton.widthAnchor.constraint(equalToConstant: 14),
+            clearButton.heightAnchor.constraint(equalToConstant: 14),
         ])
 
-        refresh()
-
         let click = NSClickGestureRecognizer(target: self, action: #selector(startRecording))
-        container.addGestureRecognizer(click)
+        addGestureRecognizer(click)
+
+        refresh()
     }
 
-    func refresh() {
-        label.stringValue = isRecording ? "Type shortcut…" : shortcut.displayString
-        let hasSetting = shortcut.key != nil
-        clearButton.isHidden = !hasSetting
-        container.layer?.borderColor = isRecording
+    public func refresh() {
+        let hasShortcut = shortcut.key != nil
+
+        if isRecording {
+            shortcutLabel.stringValue = "Type shortcut…"
+            shortcutLabel.textColor = .secondaryLabelColor
+        } else if hasShortcut {
+            shortcutLabel.stringValue = shortcut.displayString
+            shortcutLabel.textColor = .labelColor
+        } else {
+            shortcutLabel.stringValue = "Record Shortcut"
+            shortcutLabel.textColor = .secondaryLabelColor
+        }
+
+        clearButton.isHidden = !hasShortcut || isRecording
+
+        layer?.borderColor = isRecording
             ? NSColor.controlAccentColor.cgColor
             : NSColor.separatorColor.cgColor
-        container.layer?.backgroundColor = isRecording
+        layer?.backgroundColor = isRecording
             ? NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
             : NSColor.controlBackgroundColor.cgColor
     }
@@ -126,20 +128,19 @@ private final class RecorderNSView: NSView {
 
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handleKeyEvent(event)
-            return nil  // consume event
+            return nil
         }
     }
 
     private func handleKeyEvent(_ event: NSEvent) {
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        let key = Key(keyCode: event.keyCode)
 
         if event.keyCode == Key.escape.keyCode {
-            // Cancel recording
+            // cancel — restore previous
         } else if event.keyCode == Key.delete.keyCode && modifiers.isEmpty {
             shortcut.reset()
         } else {
-            shortcut.set(key: key, modifiers: modifiers)
+            shortcut.set(key: Key(keyCode: event.keyCode), modifiers: modifiers)
         }
 
         stopRecording()
@@ -157,9 +158,5 @@ private final class RecorderNSView: NSView {
     @objc private func clearShortcut() {
         shortcut.reset()
         refresh()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        // Handled by gesture recognizer
     }
 }
