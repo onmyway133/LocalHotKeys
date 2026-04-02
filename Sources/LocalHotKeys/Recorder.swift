@@ -51,6 +51,7 @@ public final class RecorderNSView: NSSearchField, NSSearchFieldDelegate {
     public init(shortcut: Shortcut) {
         self.shortcut = shortcut
         super.init(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
+        ShortcutStore.shared.register(shortcut)
         configure()
         refresh()
     }
@@ -126,11 +127,30 @@ public final class RecorderNSView: NSSearchField, NSSearchFieldDelegate {
         } else if event.keyCode == Key.delete.keyCode && modifiers.isEmpty {
             shortcut.reset()
         } else {
-            shortcut.set(key: Key(keyCode: event.keyCode), modifiers: modifiers)
+            let newKey = Key(keyCode: event.keyCode)
+            if let conflict = ShortcutStore.shared.conflict(key: newKey, modifiers: modifiers, excluding: shortcut.id) {
+                blur()
+                showConflictAlert(conflicting: conflict)
+                return
+            }
+            shortcut.set(key: newKey, modifiers: modifiers)
         }
 
         refresh()
         blur()
+    }
+
+    private func showConflictAlert(conflicting: Shortcut) {
+        let alert = NSAlert()
+        alert.messageText = "Shortcut already in use"
+        alert.informativeText = "\"\(conflicting.id)\" is already using this shortcut. Please choose a different one."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        if let window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     private func stopRecording() {
