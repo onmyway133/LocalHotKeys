@@ -5,9 +5,9 @@ import AppKit
 ///
 /// Usage:
 /// ```swift
-/// LocalShortcuts.ShortcutRecorder("Navigate Left", shortcut: .navigateLeft)
+/// LocalShortcuts.Recorder("Navigate Left", shortcut: .navigateLeft)
 /// ```
-public struct ShortcutRecorder: View {
+public struct Recorder: View {
     private let label: String
     private let shortcut: Shortcut
 

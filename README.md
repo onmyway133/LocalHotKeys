@@ -43,8 +43,8 @@ import LocalHotKeys
 struct ShortcutsView: View {
     var body: some View {
         Form {
-            LocalHotKeys.ShortcutRecorder("Navigate Left",  shortcut: .navigateLeft)
-            LocalHotKeys.ShortcutRecorder("Navigate Right", shortcut: .navigateRight)
+            LocalHotKeys.Recorder("Navigate Left",  shortcut: .navigateLeft)
+            LocalHotKeys.Recorder("Navigate Right", shortcut: .navigateRight)
         }
     }
 }
@@ -53,7 +53,7 @@ struct ShortcutsView: View {
 ## How it works
 
 - **Default binding** — each `Shortcut` is initialized with a default key + modifiers.
-- **User override** — when the user records a new binding via `ShortcutRecorder`, it's saved to `UserDefaults` under `LocalHotKeys_<id>_keyCode` and `LocalHotKeys_<id>_modifiers`.
+- **User override** — when the user records a new binding via `Recorder`, it's saved to `UserDefaults` under `LocalHotKeys_<id>_keyCode` and `LocalHotKeys_<id>_modifiers`.
 - **Matching** — `event.matches(_:)` compares the event's `keyCode` and relevant modifier flags against the shortcut's current binding (override if set, otherwise default).
 - **Reset** — pressing Delete in the recorder (or calling `shortcut.reset()`) removes the override and restores the default.
 
@@ -88,10 +88,10 @@ Common keys available as static constants:
 event.matches(.navigateLeft)  // true if keyCode + modifiers match
 ```
 
-### `ShortcutRecorder`
+### `Recorder`
 
 ```swift
-LocalHotKeys.ShortcutRecorder("Label", shortcut: .myShortcut)
+LocalHotKeys.Recorder("Label", shortcut: .myShortcut)
 ```
 
 Click the field to record a new shortcut. Press Escape to cancel, Delete to clear.
