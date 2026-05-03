@@ -2,6 +2,7 @@ import AppKit
 
 /// Persists user-customized shortcut overrides in UserDefaults.
 /// Also maintains a registry of all declared shortcuts for conflict detection.
+@MainActor
 final class ShortcutStore {
     static let shared = ShortcutStore()
     private let defaults = UserDefaults.standard
