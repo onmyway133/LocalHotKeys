@@ -9,10 +9,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "LocalHotKeys",
-            swiftSettings: [
-                .defaultIsolation(MainActor.self)
-            ]
+            name: "LocalHotKeys"
         ),
     ]
 )
